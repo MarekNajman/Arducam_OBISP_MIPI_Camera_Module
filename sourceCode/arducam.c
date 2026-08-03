@@ -19,13 +19,18 @@
 #include <linux/gpio/consumer.h>
 #include <linux/i2c.h>
 #include <linux/module.h>
+#include <linux/version.h>
 #include <linux/pm_runtime.h>
 #include <linux/regulator/consumer.h>
 #include <media/v4l2-ctrls.h>
 #include <media/v4l2-device.h>
 #include <media/v4l2-fwnode.h>
 #include <media/v4l2-mediabus.h>
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 12, 0)
+#include <linux/unaligned.h>
+#else
 #include <asm/unaligned.h>
+#endif
 
 #define arducam_REG_VALUE_08BIT		1
 #define arducam_REG_VALUE_16BIT		2
@@ -467,10 +472,30 @@ out:
 	return ret;
 }
 
+/*
+ * V4L2 subdev pad state was converted from v4l2_subdev_pad_config to
+ * v4l2_subdev_state in newer kernels. Keep the 5.4 API at the call sites
+ * through small wrappers and switch only the changed type/helper name.
+ */
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 15, 0)
+#define ARDUCAM_SUBDEV_PAD_STATE struct v4l2_subdev_state
+#define arducam_get_try_format(sd, state, pad) \
+	v4l2_subdev_state_get_format((state), (pad))
+#else
+#define ARDUCAM_SUBDEV_PAD_STATE struct v4l2_subdev_pad_config
+#define arducam_get_try_format(sd, state, pad) \
+	v4l2_subdev_get_try_format((sd), (state), (pad))
+#endif
+
 static int arducam_open(struct v4l2_subdev *sd, struct v4l2_subdev_fh *fh)
 {
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 15, 0)
+	struct v4l2_mbus_framefmt *try_fmt =
+		arducam_get_try_format(sd, fh->state, 0);
+#else
 	struct v4l2_mbus_framefmt *try_fmt =
 		v4l2_subdev_get_try_format(sd, fh->pad, 0);
+#endif
 
 	/* Initialize try_fmt */
 	try_fmt->width = supported_modes[0].width;
@@ -553,7 +578,7 @@ static const struct v4l2_ctrl_ops arducam_ctrl_ops = {
 
 
 static int arducam_enum_mbus_code(struct v4l2_subdev *sd,
-				 struct v4l2_subdev_pad_config *cfg,
+				 ARDUCAM_SUBDEV_PAD_STATE *cfg,
 				 struct v4l2_subdev_mbus_code_enum *code)
 {
 	/* Only one bayer order(GRBG) is supported */
@@ -565,7 +590,7 @@ static int arducam_enum_mbus_code(struct v4l2_subdev *sd,
 
 static int arducam_csi2_enum_mbus_code(
 			struct v4l2_subdev *sd,
-			struct v4l2_subdev_pad_config *cfg,
+			ARDUCAM_SUBDEV_PAD_STATE *cfg,
 			struct v4l2_subdev_mbus_code_enum *code)
 {
 	struct arducam *priv = to_arducam(sd);
@@ -581,7 +606,7 @@ static int arducam_csi2_enum_mbus_code(
 }
 
 static int arducam_enum_frame_size(struct v4l2_subdev *sd,
-				  struct v4l2_subdev_pad_config *cfg,
+				  ARDUCAM_SUBDEV_PAD_STATE *cfg,
 				  struct v4l2_subdev_frame_size_enum *fse)
 {
 	if (fse->index >= ARRAY_SIZE(supported_modes))
@@ -598,7 +623,7 @@ static int arducam_enum_frame_size(struct v4l2_subdev *sd,
 }
 static int arducam_csi2_enum_framesizes(
 			struct v4l2_subdev *sd,
-			struct v4l2_subdev_pad_config *cfg,
+			ARDUCAM_SUBDEV_PAD_STATE *cfg,
 			struct v4l2_subdev_frame_size_enum *fse)
 {
 	int i;
@@ -630,7 +655,7 @@ enum arducam_frame_rate {
 };
 static int arducam_csi2_enum_frame_interval(	
 	struct v4l2_subdev *sd,
-	struct v4l2_subdev_pad_config *cfg,
+	ARDUCAM_SUBDEV_PAD_STATE *cfg,
 	struct v4l2_subdev_frame_interval_enum *fie)
 {
 	int i;
@@ -670,7 +695,7 @@ static void arducam_update_pad_format(const struct arducam_mode *mode,
 
 
 static int arducam_csi2_get_fmt(struct v4l2_subdev *sd,
-								struct v4l2_subdev_pad_config *cfg,
+								ARDUCAM_SUBDEV_PAD_STATE *cfg,
 								struct v4l2_subdev_format *format)
 {
 	struct arducam *priv = to_arducam(sd);
@@ -695,7 +720,7 @@ static int arducam_csi2_get_fmt(struct v4l2_subdev *sd,
 }
 
 static int arducam_set_pad_format(struct v4l2_subdev *sd,
-				 struct v4l2_subdev_pad_config *cfg,
+				 ARDUCAM_SUBDEV_PAD_STATE *cfg,
 				 struct v4l2_subdev_format *fmt)
 {
 	struct arducam *arducam = to_arducam(sd);
@@ -712,7 +737,7 @@ static int arducam_set_pad_format(struct v4l2_subdev *sd,
 				      fmt->format.width, fmt->format.height);
 	arducam_update_pad_format(mode, fmt);
 	if (fmt->which == V4L2_SUBDEV_FORMAT_TRY) {
-		framefmt = v4l2_subdev_get_try_format(sd, cfg, fmt->pad);
+		framefmt = arducam_get_try_format(sd, cfg, fmt->pad);
 		*framefmt = fmt->format;
 	} else {
 		arducam->mode = mode;
@@ -734,7 +759,7 @@ static int arducam_csi2_get_fmt_idx_by_code(struct arducam *priv,
 	return -EINVAL;
 }
 static int arducam_csi2_set_fmt(struct v4l2_subdev *sd,
-								struct v4l2_subdev_pad_config *cfg,
+								ARDUCAM_SUBDEV_PAD_STATE *cfg,
 								struct v4l2_subdev_format *format)
 {
 	int i, j;
@@ -1380,8 +1405,12 @@ err:
 	return -ENODEV;
 }
 
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 3, 0)
+static int arducam_probe(struct i2c_client *client)
+#else
 static int arducam_probe(struct i2c_client *client,
 			const struct i2c_device_id *id)
+#endif
 {
 	struct device *dev = &client->dev;
 	struct fwnode_handle *endpoint;
@@ -1455,7 +1484,15 @@ static int arducam_probe(struct i2c_client *client,
 	if (ret)
 		goto error_handler_free;
 
+	/*
+	 * v4l2_async_register_subdev_sensor_common() was folded into
+	 * v4l2_async_register_subdev_sensor() in newer media kernels.
+	 */
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 1, 0)
+	ret = v4l2_async_register_subdev_sensor(&arducam->sd);
+#else
 	ret = v4l2_async_register_subdev_sensor_common(&arducam->sd);
+#endif
 	if (ret < 0)
 		goto error_media_entity;
 
@@ -1474,7 +1511,11 @@ error_handler_free:
 	return ret;
 }
 
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 1, 0)
+static void arducam_remove(struct i2c_client *client)
+#else
 static int arducam_remove(struct i2c_client *client)
+#endif
 {
 	struct v4l2_subdev *sd = i2c_get_clientdata(client);
 	struct arducam *arducam = to_arducam(sd);
@@ -1486,7 +1527,9 @@ static int arducam_remove(struct i2c_client *client)
 	pm_runtime_disable(&client->dev);
 	pm_runtime_set_suspended(&client->dev);
 
+#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 1, 0)
 	return 0;
+#endif
 }
 
 static const struct of_device_id arducam_dt_ids[] = {

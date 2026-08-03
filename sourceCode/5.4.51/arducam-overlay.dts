@@ -6,7 +6,7 @@
 #include <dt-bindings/gpio/gpio.h>
 
 /{
-	compatible = "brcm,bcm2835";
+	compatible = "brcm,bcm2712", "brcm,bcm2711", "brcm,bcm2835";
 
 	fragment@0 {
 		target = <&i2c_csi_dsi>;
