@@ -1,7 +1,7 @@
 /dts-v1/;
 
 / {
-	compatible = "brcm,bcm2835";
+	compatible = "brcm,bcm2712", "brcm,bcm2711", "brcm,bcm2835";
 
 	fragment@0 {
 		target = < 0xffffffff >;
