@@ -473,22 +473,16 @@ out:
 }
 
 /*
- * V4L2 subdev pad callbacks switched from v4l2_subdev_pad_config to
- * v4l2_subdev_state before the try-format accessor was renamed. Kernels
- * 5.15 through 6.7 therefore need the state callback type with the old
- * v4l2_subdev_get_try_format() helper. Use the renamed
- * v4l2_subdev_state_get_format() only on kernels that provide it.
+ * V4L2 subdev pad state was converted from v4l2_subdev_pad_config to
+ * v4l2_subdev_state in newer kernels. Keep the 5.4 API at the call sites
+ * through small wrappers and switch only the changed type/helper name.
  */
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 15, 0)
 #define ARDUCAM_SUBDEV_PAD_STATE struct v4l2_subdev_state
-#else
-#define ARDUCAM_SUBDEV_PAD_STATE struct v4l2_subdev_pad_config
-#endif
-
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 8, 0)
 #define arducam_get_try_format(sd, state, pad) \
 	v4l2_subdev_state_get_format((state), (pad))
 #else
+#define ARDUCAM_SUBDEV_PAD_STATE struct v4l2_subdev_pad_config
 #define arducam_get_try_format(sd, state, pad) \
 	v4l2_subdev_get_try_format((sd), (state), (pad))
 #endif
