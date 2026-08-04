@@ -1,190 +1,186 @@
 --- a/drivers/media/i2c/arducam-pivariety.c
 +++ b/drivers/media/i2c/arducam-pivariety.c
-@@ -1193,18 +1193,43 @@
- 	struct v4l2_ctrl_handler *ctrl_hdlr = &pivariety->ctrl_handler;
- 	struct v4l2_fwnode_device_properties props;
- 	struct v4l2_ctrl **ctrl = pivariety->ctrls;
+@@ -1193,18 +1193,56 @@ static int pivariety_enum_controls(struct pivariety *pivariety)
+	struct v4l2_ctrl_handler *ctrl_hdlr = &pivariety->ctrl_handler;
+	struct v4l2_fwnode_device_properties props;
+	struct v4l2_ctrl **ctrl = pivariety->ctrls;
 -	int ret, index, num_ctrls;
-+	int ret, index = -1, num_ctrls;
- 	u32 id, min, max, def, step;
++	int ret = 0, index = -1, num_ctrls;
+	u32 id, min, max, def, step;
 +	u32 val;
- 
+
 -	num_ctrls = pivariety_get_length_of_set(pivariety, CTRL_INDEX_REG,
 -						CTRL_ID_REG);
 -	if (num_ctrls < 0)
 -		goto err;
++	v4l2_info(sd, "Discovering controls...\n");
 +	for (num_ctrls = 0; ; num_ctrls++) {
-+		v4l2_info(sd, "%s: count index=%d write reg=0x%04x value=0x%08x\n",
-+			  __func__, num_ctrls, CTRL_INDEX_REG, num_ctrls);
++		v4l2_info(sd, "index = %d\nstep = write CTRL_INDEX_REG\nCTRL_INDEX_REG (0x%04x) <- %d\n",
++			  num_ctrls, CTRL_INDEX_REG, num_ctrls);
 +		ret = pivariety_write(pivariety, CTRL_INDEX_REG, num_ctrls);
-+		v4l2_info(sd, "%s: count index=%d write reg=0x%04x errno=%d\n",
-+			  __func__, num_ctrls, CTRL_INDEX_REG, ret);
-+		if (ret < 0)
++		v4l2_info(sd, "ret = %d\n", ret);
++		if (ret < 0) {
++			v4l2_err(sd, "ENUM FAILED\nindex = %d\nstep = write CTRL_INDEX_REG\nret = %d\nreason = count discovery index write failed\n",
++				 num_ctrls, ret);
 +			goto err;
++		}
 +
-+		v4l2_info(sd, "%s: count index=%d read reg=0x%04x\n",
-+			  __func__, num_ctrls, CTRL_ID_REG);
++		v4l2_info(sd, "index = %d\nstep = read CTRL_ID_REG\nCTRL_ID_REG (0x%04x) ->\n",
++			  num_ctrls, CTRL_ID_REG);
 +		ret = pivariety_read(pivariety, CTRL_ID_REG, &val);
-+		v4l2_info(sd, "%s: count index=%d read reg=0x%04x value=0x%08x errno=%d\n",
-+			  __func__, num_ctrls, CTRL_ID_REG, val, ret);
-+		if (ret < 0)
++		v4l2_info(sd, "value = 0x%08x\nret = %d\n", val, ret);
++		if (ret < 0) {
++			v4l2_err(sd, "ENUM FAILED\nindex = %d\nstep = read CTRL_ID_REG\nret = %d\nreason = count discovery id read failed\n",
++				 num_ctrls, ret);
 +			goto err;
- 
--	v4l2_dbg(1, debug, sd, "%s: num_ctrls = %d\n",
--		 __func__, num_ctrls);
++		}
 +		if (val == NO_DATA_AVAILABLE)
 +			break;
++		v4l2_info(sd, "control[%d] id=0x%08x\n", num_ctrls, val);
 +	}
+
+-	v4l2_dbg(1, debug, sd, "%s: num_ctrls = %d\n",
+-		 __func__, num_ctrls);
++	v4l2_info(sd, "Detected %d controls\n", num_ctrls);
+
+	ret = v4l2_ctrl_handler_init(ctrl_hdlr, num_ctrls);
+-	if (ret)
++	v4l2_info(sd, "index = %d\nstep = v4l2_ctrl_handler_init\nret = %d\n",
++		  index, ret);
++	if (ret) {
++		v4l2_err(sd, "ENUM FAILED\nindex = %d\nstep = v4l2_ctrl_handler_init\nret = %d\nreason = control handler init failed\n",
++			 index, ret);
+		return ret;
++	}
+
+	mutex_init(&pivariety->mutex);
+
+@@ -1212,17 +1250,91 @@ static int pivariety_enum_controls(struct pivariety *pivariety)
+	index = 0;
+	while (1) {
++		int idle_count;
 +
-+	v4l2_info(sd, "%s: count reset write reg=0x%04x value=0x%08x\n",
-+		  __func__, CTRL_INDEX_REG, 0);
-+	ret = pivariety_write(pivariety, CTRL_INDEX_REG, 0);
-+	v4l2_info(sd, "%s: count reset write reg=0x%04x errno=%d\n",
-+		  __func__, CTRL_INDEX_REG, ret);
-+
-+	v4l2_info(sd, "%s: detected control count=%d\n",
-+		  __func__, num_ctrls);
- 
- 	ret = v4l2_ctrl_handler_init(ctrl_hdlr, num_ctrls);
-+	v4l2_info(sd, "%s: v4l2_ctrl_handler_init count=%d errno=%d\n",
-+		  __func__, num_ctrls, ret);
- 	if (ret)
- 		return ret;
- 
-@@ -1212,17 +1237,81 @@
- 
- 	index = 0;
- 	while (1) {
-+		int first_ret = 0;
-+		int op_ret;
-+
-+		v4l2_info(sd, "%s: parse index=%d write reg=0x%04x value=0x%08x\n",
-+			  __func__, index, CTRL_INDEX_REG, index);
- 		ret = pivariety_write(pivariety, CTRL_INDEX_REG, index);
++		v4l2_info(sd, "index = %d\nstep = write CTRL_INDEX_REG\nCTRL_INDEX_REG (0x%04x) <- %d\n",
++			  index, CTRL_INDEX_REG, index);
+		ret = pivariety_write(pivariety, CTRL_INDEX_REG, index);
 -		pivariety_write(pivariety, CTRL_VALUE_REG, 0);
 -		wait_for_free(pivariety, 1);
-+		v4l2_info(sd, "%s: parse index=%d write reg=0x%04x errno=%d\n",
-+			  __func__, index, CTRL_INDEX_REG, ret);
-+		if (ret < 0 && !first_ret)
-+			first_ret = ret;
-+
-+		v4l2_info(sd, "%s: parse index=%d write reg=0x%04x value=0x%08x\n",
-+			  __func__, index, CTRL_VALUE_REG, 0);
-+		op_ret = pivariety_write(pivariety, CTRL_VALUE_REG, 0);
-+		v4l2_info(sd, "%s: parse index=%d write reg=0x%04x errno=%d\n",
-+			  __func__, index, CTRL_VALUE_REG, op_ret);
-+		if (op_ret < 0 && !first_ret)
-+			first_ret = op_ret;
-+
-+		{
-+			u32 idle;
-+			u32 count = 0;
-+
-+			while (count++ < 1000) {
-+				op_ret = pivariety_read(pivariety, SYSTEM_IDLE_REG, &idle);
-+				v4l2_info(sd, "%s: parse index=%d wait read reg=0x%04x value=0x%08x errno=%d count=%u\n",
-+					  __func__, index, SYSTEM_IDLE_REG, idle, op_ret, count);
-+				if (!op_ret && !idle)
-+					break;
-+				msleep(1);
-+			}
-+			v4l2_info(sd, "%s: parse index=%d wait_for_free-equivalent complete count=%u errno=0\n",
-+				  __func__, index, count);
++		v4l2_info(sd, "ret = %d\n", ret);
++		if (ret < 0) {
++			v4l2_err(sd, "ENUM FAILED\nindex = %d\nstep = write CTRL_INDEX_REG\nret = %d\nreason = descriptor index write failed\n",
++				 index, ret);
++			goto err;
 +		}
- 
++
++		v4l2_info(sd, "index = %d\nstep = write CTRL_VALUE_REG\nCTRL_VALUE_REG (0x%04x) <- 0\n",
++			  index, CTRL_VALUE_REG);
++		ret = pivariety_write(pivariety, CTRL_VALUE_REG, 0);
++		v4l2_info(sd, "ret = %d\n", ret);
++		if (ret < 0) {
++			v4l2_err(sd, "ENUM FAILED\nindex = %d\nstep = write CTRL_VALUE_REG\nret = %d\nreason = descriptor value reset write failed\n",
++				 index, ret);
++			goto err;
++		}
++
++		for (idle_count = 0; idle_count < 1000; idle_count++) {
++			v4l2_info(sd, "index = %d\nstep = read SYSTEM_IDLE_REG\nSYSTEM_IDLE_REG (0x%04x) ->\n",
++				  index, SYSTEM_IDLE_REG);
++			ret = pivariety_read(pivariety, SYSTEM_IDLE_REG, &val);
++			v4l2_info(sd, "value = 0x%08x\nret = %d\n", val, ret);
++			if (ret < 0) {
++				v4l2_err(sd, "ENUM FAILED\nindex = %d\nstep = read SYSTEM_IDLE_REG\nret = %d\nreason = idle wait read failed\n",
++					 index, ret);
++				goto err;
++			}
++			if (!val)
++				break;
++			msleep(1);
++		}
++		if (idle_count == 1000) {
++			ret = -ETIMEDOUT;
++			v4l2_err(sd, "ENUM FAILED\nindex = %d\nstep = read SYSTEM_IDLE_REG\nret = %d\nreason = idle wait timed out\n",
++				 index, ret);
++			goto err;
++		}
+
 -		ret += pivariety_read(pivariety, CTRL_ID_REG, &id);
 -		ret += pivariety_read(pivariety, CTRL_MAX_REG, &max);
 -		ret += pivariety_read(pivariety, CTRL_MIN_REG, &min);
 -		ret += pivariety_read(pivariety, CTRL_DEF_REG, &def);
 -		ret += pivariety_read(pivariety, CTRL_STEP_REG, &step);
 -		if (ret < 0)
-+		op_ret = pivariety_read(pivariety, CTRL_ID_REG, &id);
-+		v4l2_info(sd, "%s: parse index=%d read reg=0x%04x value=0x%08x errno=%d\n",
-+			  __func__, index, CTRL_ID_REG, id, op_ret);
-+		ret += op_ret;
-+		if (op_ret < 0 && !first_ret)
-+			first_ret = op_ret;
 +
-+		op_ret = pivariety_read(pivariety, CTRL_MAX_REG, &max);
-+		v4l2_info(sd, "%s: parse index=%d read reg=0x%04x value=0x%08x errno=%d\n",
-+			  __func__, index, CTRL_MAX_REG, max, op_ret);
-+		ret += op_ret;
-+		if (op_ret < 0 && !first_ret)
-+			first_ret = op_ret;
-+
-+		op_ret = pivariety_read(pivariety, CTRL_MIN_REG, &min);
-+		v4l2_info(sd, "%s: parse index=%d read reg=0x%04x value=0x%08x errno=%d\n",
-+			  __func__, index, CTRL_MIN_REG, min, op_ret);
-+		ret += op_ret;
-+		if (op_ret < 0 && !first_ret)
-+			first_ret = op_ret;
-+
-+		op_ret = pivariety_read(pivariety, CTRL_DEF_REG, &def);
-+		v4l2_info(sd, "%s: parse index=%d read reg=0x%04x value=0x%08x errno=%d\n",
-+			  __func__, index, CTRL_DEF_REG, def, op_ret);
-+		ret += op_ret;
-+		if (op_ret < 0 && !first_ret)
-+			first_ret = op_ret;
-+
-+		op_ret = pivariety_read(pivariety, CTRL_STEP_REG, &step);
-+		v4l2_info(sd, "%s: parse index=%d read reg=0x%04x value=0x%08x errno=%d\n",
-+			  __func__, index, CTRL_STEP_REG, step, op_ret);
-+		ret += op_ret;
-+		if (op_ret < 0 && !first_ret)
-+			first_ret = op_ret;
-+
-+		if (ret < 0) {
-+			v4l2_err(sd, "%s: parse index=%d first errno=%d cumulative errno=%d\n",
-+				 __func__, index, first_ret, ret);
- 			goto err;
++#define PIVARIETY_ENUM_READ(_name, _reg, _dst) \
++		v4l2_info(sd, "index = %d\nstep = read " _name "\n" _name " (0x%04x) ->\n", \
++			  index, _reg); \
++		ret = pivariety_read(pivariety, _reg, _dst); \
++		v4l2_info(sd, "value = 0x%08x\nret = %d\n", *(_dst), ret); \
++		if (ret < 0) { \
++			v4l2_err(sd, "ENUM FAILED\nindex = %d\nstep = read " _name "\nret = %d\nreason = descriptor read failed\n", \
++				 index, ret); \
+			goto err;
 +		}
- 
- 		if (id == NO_DATA_AVAILABLE || max == NO_DATA_AVAILABLE ||
- 		    min == NO_DATA_AVAILABLE || def == NO_DATA_AVAILABLE ||
-@@ -1254,8 +1343,11 @@
- 			continue;
- 		}
- 
++
++		PIVARIETY_ENUM_READ("CTRL_ID_REG", CTRL_ID_REG, &id);
++		PIVARIETY_ENUM_READ("CTRL_MAX_REG", CTRL_MAX_REG, &max);
++		PIVARIETY_ENUM_READ("CTRL_MIN_REG", CTRL_MIN_REG, &min);
++		PIVARIETY_ENUM_READ("CTRL_DEF_REG", CTRL_DEF_REG, &def);
++		PIVARIETY_ENUM_READ("CTRL_STEP_REG", CTRL_STEP_REG, &step);
++#undef PIVARIETY_ENUM_READ
+
+		if (id == NO_DATA_AVAILABLE || max == NO_DATA_AVAILABLE ||
+		    min == NO_DATA_AVAILABLE || def == NO_DATA_AVAILABLE ||
+@@ -1254,8 +1366,15 @@ static int pivariety_enum_controls(struct pivariety *pivariety)
+			continue;
+		}
+
 -		if (!*ctrl)
++		v4l2_info(sd, "index = %d\nstep = create control\nid = 0x%08x\nret = %d\n",
++			  index, id, *ctrl ? 0 : -ENODEV);
 +		if (!*ctrl) {
-+			v4l2_err(sd, "%s: parse index=%d ctrl allocation failed id=0x%08x errno=%d\n",
-+				 __func__, index, id, ret);
- 			goto err;
++			ret = -ENODEV;
++			v4l2_err(sd, "ENUM FAILED\nindex = %d\nstep = create control\nret = %d\nreason = v4l2 control allocation failed\n",
++				 index, ret);
+			goto err;
 +		}
- 
- 		switch (id) {
- 		case V4L2_CID_HFLIP:
-@@ -1281,15 +1373,23 @@
- 		index++;
- 	}
- 
+
+		switch (id) {
+		case V4L2_CID_HFLIP:
+@@ -1281,15 +1400,31 @@ static int pivariety_enum_controls(struct pivariety *pivariety)
+		index++;
+	}
+
 -	pivariety_write(pivariety, CTRL_INDEX_REG, 0);
-+	v4l2_info(sd, "%s: final reset write reg=0x%04x value=0x%08x\n",
-+		  __func__, CTRL_INDEX_REG, 0);
++	v4l2_info(sd, "index = %d\nstep = reset CTRL_INDEX_REG\nCTRL_INDEX_REG (0x%04x) <- 0\n",
++		  index, CTRL_INDEX_REG);
 +	ret = pivariety_write(pivariety, CTRL_INDEX_REG, 0);
-+	v4l2_info(sd, "%s: final reset write reg=0x%04x errno=%d\n",
-+		  __func__, CTRL_INDEX_REG, ret);
- 
- 	ret = v4l2_fwnode_device_parse(&client->dev, &props);
-+	v4l2_info(sd, "%s: v4l2_fwnode_device_parse errno=%d\n",
-+		  __func__, ret);
- 	if (ret)
- 		goto err;
- 
- 	ret = v4l2_ctrl_new_fwnode_properties(ctrl_hdlr,
- 					      &pivariety_ctrl_ops,
- 					      &props);
-+	v4l2_info(sd, "%s: v4l2_ctrl_new_fwnode_properties errno=%d\n",
-+		  __func__, ret);
- 	if (ret)
- 		goto err;
- 
-@@ -1297,6 +1397,8 @@
- 	v4l2_ctrl_handler_setup(ctrl_hdlr);
- 	return 0;
++	v4l2_info(sd, "ret = %d\n", ret);
++	if (ret < 0) {
++		v4l2_err(sd, "ENUM FAILED\nindex = %d\nstep = reset CTRL_INDEX_REG\nret = %d\nreason = final index reset failed\n",
++			 index, ret);
++		goto err;
++	}
+
+	ret = v4l2_fwnode_device_parse(&client->dev, &props);
++	v4l2_info(sd, "index = %d\nstep = v4l2_fwnode_device_parse\nret = %d\n",
++		  index, ret);
+	if (ret)
+		goto err;
+
+	ret = v4l2_ctrl_new_fwnode_properties(ctrl_hdlr,
+					      &pivariety_ctrl_ops,
+					      &props);
++	v4l2_info(sd, "index = %d\nstep = v4l2_ctrl_new_fwnode_properties\nret = %d\n",
++		  index, ret);
+	if (ret)
+		goto err;
+
+@@ -1297,6 +1432,8 @@ static int pivariety_enum_controls(struct pivariety *pivariety)
+	v4l2_ctrl_handler_setup(ctrl_hdlr);
+	return 0;
  err:
-+	v4l2_err(sd, "%s: returning -ENODEV while parsing index=%d errno=%d\n",
-+		 __func__, index, ret);
- 	mutex_destroy(&pivariety->mutex);
- 	return -ENODEV;
++	v4l2_err(sd, "ENUM FAILED\nindex = %d\nstep = return -ENODEV\nret = %d\nreason = pivariety_enum_controls failed\n",
++		 index, ret);
+	mutex_destroy(&pivariety->mutex);
+	return -ENODEV;
  }
