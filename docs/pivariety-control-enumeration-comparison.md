@@ -102,30 +102,6 @@ The legacy OBISP driver performs the same basic indexed firmware descriptor quer
 5. It creates either a custom Arducam control or a standard V4L2 control.
 6. It resets `CTRL_INDEX_REG` to 0 and returns success.
 
-
-## Exact side-by-side I2C register transaction sequence
-
-The table below compares the control enumeration protocol for one control index `N`. Both drivers first run the same count-discovery protocol, then enumerate full descriptors.
-
-| Step | Legacy OBISP | Pivariety | Write register | Read register | Expected response |
-| ---: | --- | --- | --- | --- | --- |
-| 1 | Count discovery: select index `N`. | Count discovery: select index `N`. | Both write `CTRL_INDEX_REG = N` (`0x0400`). | — | I2C write succeeds. |
-| 2 | Count discovery: read the selected control ID. | Count discovery: read the selected control ID. | — | Both read `CTRL_ID_REG` (`0x0401`). | A valid control ID means continue counting; `NO_DATA_AVAILABLE` (`0xFFFFFFFE`) means the count is complete. |
-| 3 | Count discovery cleanup. | Count discovery cleanup. | Both reset `CTRL_INDEX_REG = 0` (`0x0400`). | — | Write return value is ignored by both implementations. |
-| 4 | Descriptor enumeration: select descriptor index `N`. | Descriptor enumeration: select descriptor index `N`. | Both write `CTRL_INDEX_REG = N` (`0x0400`). | — | I2C write succeeds. |
-| 5 | **No transaction. This step is absent in legacy OBISP.** | **First protocol difference:** clear/request current control value before descriptor reads. | Pivariety writes `CTRL_VALUE_REG = 0` (`0x0406`). | — | Pivariety expects the write to be accepted; the original source ignores this return code. |
-| 6 | **No wait. Legacy immediately reads descriptor fields.** | Wait for firmware to finish the operation triggered in step 5. | — | Pivariety polls `SYSTEM_IDLE_REG` (`0x0107`) through `wait_for_free()`. | Wait exits when `SYSTEM_IDLE_REG` reads `0`; timeout-like exhaustion still returns `0` in the inspected source. |
-| 7 | Read descriptor ID. | Read descriptor ID. | — | Both read `CTRL_ID_REG` (`0x0401`). | Valid control ID, or `NO_DATA_AVAILABLE` to terminate enumeration. |
-| 8 | Read descriptor maximum. | Read descriptor maximum. | — | Both read `CTRL_MAX_REG` (`0x0403`). | Valid maximum, or `NO_DATA_AVAILABLE` to terminate enumeration. |
-| 9 | Read descriptor minimum. | Read descriptor minimum. | — | Both read `CTRL_MIN_REG` (`0x0402`). | Valid minimum, or `NO_DATA_AVAILABLE` to terminate enumeration. |
-| 10 | Read descriptor default. | Read descriptor default. | — | Both read `CTRL_DEF_REG` (`0x0405`). | Valid default, or `NO_DATA_AVAILABLE` to terminate enumeration. |
-| 11 | Read descriptor step. | Read descriptor step. | — | Both read `CTRL_STEP_REG` (`0x0404`). | Valid step, or `NO_DATA_AVAILABLE` to terminate enumeration. |
-| 12 | If any descriptor read/write return is negative, return `-ENODEV`; if any descriptor field is `NO_DATA_AVAILABLE`, stop the loop normally. | Same negative-return and sentinel checks after descriptor reads. | — | — | Valid tuple creates a V4L2 control; sentinel ends descriptor enumeration. |
-| 13 | Creates a custom Arducam control if `arducam_ctrl_get_name(id)` is known; otherwise attempts `v4l2_ctrl_new_std()` for the ID. | Creates standard V4L2 controls first, then known Pivariety custom controls; unknown IDs are skipped. | — | — | Control object is registered or skipped depending on ID handling. |
-| 14 | Final cleanup after descriptor enumeration. | Final cleanup after descriptor enumeration. | Both reset `CTRL_INDEX_REG = 0` (`0x0400`). | — | Write return value is ignored by legacy; Pivariety source also does not branch on it. |
-
-**First protocol difference:** the first I²C-level protocol difference is step 5. Pivariety writes `CTRL_VALUE_REG = 0` after selecting the control index and before reading descriptor fields. Legacy OBISP does not write `CTRL_VALUE_REG` during enumeration. The next related difference is step 6, where Pivariety polls `SYSTEM_IDLE_REG`; legacy OBISP has no equivalent wait before reading `CTRL_ID_REG`, `CTRL_MAX_REG`, `CTRL_MIN_REG`, `CTRL_DEF_REG`, and `CTRL_STEP_REG`.
-
 ## Differences that matter
 
 | Area | In-tree Pivariety | Legacy OBISP in this repository | Impact |

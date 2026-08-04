@@ -473,22 +473,16 @@ out:
 }
 
 /*
- * V4L2 subdev pad callbacks switched from v4l2_subdev_pad_config to
- * v4l2_subdev_state before the try-format accessor was renamed. Kernels
- * 5.15 through 6.7 therefore need the state callback type with the old
- * v4l2_subdev_get_try_format() helper. Use the renamed
- * v4l2_subdev_state_get_format() only on kernels that provide it.
+ * V4L2 subdev pad state was converted from v4l2_subdev_pad_config to
+ * v4l2_subdev_state in newer kernels. Keep the 5.4 API at the call sites
+ * through small wrappers and switch only the changed type/helper name.
  */
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 15, 0)
 #define ARDUCAM_SUBDEV_PAD_STATE struct v4l2_subdev_state
-#else
-#define ARDUCAM_SUBDEV_PAD_STATE struct v4l2_subdev_pad_config
-#endif
-
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 8, 0)
 #define arducam_get_try_format(sd, state, pad) \
 	v4l2_subdev_state_get_format((state), (pad))
 #else
+#define ARDUCAM_SUBDEV_PAD_STATE struct v4l2_subdev_pad_config
 #define arducam_get_try_format(sd, state, pad) \
 	v4l2_subdev_get_try_format((sd), (state), (pad))
 #endif
@@ -1355,36 +1349,81 @@ static struct v4l2_ctrl *v4l2_ctrl_new_arducam(struct v4l2_ctrl_handler *hdl,
 }
 static int arducam_enum_controls(struct arducam *priv)
 {
-	int ret;
-	int index = 0;
-	int i = 0;
+	int ret = 0;
+	int index = -1;
 	int num_ctrls = 0;
 	struct v4l2_ctrl_handler *ctrl_hdlr;
-	u32 id, min, max, def, step;
+	u32 id, min, max, def, step, val;
 	struct i2c_client *client;
+
 	ctrl_hdlr = &priv->ctrl_handler;
 	client = priv->client;
-	num_ctrls = arducam_get_length_of_set(client,
-					CTRL_INDEX_REG, CTRL_ID_REG);
-	if (num_ctrls < 0)
-		goto err;
-    v4l2_dbg(1, debug, priv->client, "%s: num_ctrls = %d\n",
-				__func__,num_ctrls);
+
+	dev_info(&client->dev, "Discovering controls...\n");
+	for (num_ctrls = 0; ; num_ctrls++) {
+		dev_info(&client->dev, "index = %d\nstep = write CTRL_INDEX_REG\nCTRL_INDEX_REG (0x%04x) <- %d\n",
+			 num_ctrls, CTRL_INDEX_REG, num_ctrls);
+		ret = arducam_write(client, CTRL_INDEX_REG, num_ctrls);
+		dev_info(&client->dev, "ret = %d\n", ret);
+		if (ret < 0) {
+			dev_err(&client->dev, "ENUM FAILED\nindex = %d\nstep = write CTRL_INDEX_REG\nret = %d\nreason = count discovery index write failed\n",
+				num_ctrls, ret);
+			goto err;
+		}
+
+		dev_info(&client->dev, "index = %d\nstep = read CTRL_ID_REG\nCTRL_ID_REG (0x%04x) ->\n",
+			 num_ctrls, CTRL_ID_REG);
+		ret = arducam_read(client, CTRL_ID_REG, &val);
+		dev_info(&client->dev, "value = 0x%08x\nret = %d\n", val, ret);
+		if (ret < 0) {
+			dev_err(&client->dev, "ENUM FAILED\nindex = %d\nstep = read CTRL_ID_REG\nret = %d\nreason = count discovery id read failed\n",
+				num_ctrls, ret);
+			goto err;
+		}
+		if (val == NO_DATA_AVAILABLE)
+			break;
+		dev_info(&client->dev, "control[%d] id=0x%08x\n", num_ctrls, val);
+	}
+	dev_info(&client->dev, "Detected %d controls\n", num_ctrls);
+
 	ret = v4l2_ctrl_handler_init(ctrl_hdlr, num_ctrls);
-	if(ret)
+	dev_info(&client->dev, "index = %d\nstep = v4l2_ctrl_handler_init\nret = %d\n", index, ret);
+	if (ret) {
+		dev_err(&client->dev, "ENUM FAILED\nindex = %d\nstep = v4l2_ctrl_handler_init\nret = %d\nreason = control handler init failed\n",
+			index, ret);
 		return ret;
-	  v4l2_dbg(1, debug, priv->client, "v4l2_ctrl_handler_init successfully\n",
-				__func__);
+	}
+
 	index = 0;
 	while (1) {
+		dev_info(&client->dev, "index = %d\nstep = write CTRL_INDEX_REG\nCTRL_INDEX_REG (0x%04x) <- %d\n",
+			 index, CTRL_INDEX_REG, index);
 		ret = arducam_write(client, CTRL_INDEX_REG, index);
-		ret += arducam_read(client, CTRL_ID_REG, &id);
-		ret += arducam_read(client, CTRL_MAX_REG, &max);
-		ret += arducam_read(client, CTRL_MIN_REG, &min);
-		ret += arducam_read(client, CTRL_DEF_REG, &def);
-		ret += arducam_read(client, CTRL_STEP_REG, &step);
-		if (ret < 0)
+		dev_info(&client->dev, "ret = %d\n", ret);
+		if (ret < 0) {
+			dev_err(&client->dev, "ENUM FAILED\nindex = %d\nstep = write CTRL_INDEX_REG\nret = %d\nreason = descriptor index write failed\n",
+				index, ret);
 			goto err;
+		}
+
+#define ARDUCAM_ENUM_READ(_name, _reg, _dst) \
+		dev_info(&client->dev, "index = %d\nstep = read " _name "\n" _name " (0x%04x) ->\n", \
+			 index, _reg); \
+		ret = arducam_read(client, _reg, _dst); \
+		dev_info(&client->dev, "value = 0x%08x\nret = %d\n", *(_dst), ret); \
+		if (ret < 0) { \
+			dev_err(&client->dev, "ENUM FAILED\nindex = %d\nstep = read " _name "\nret = %d\nreason = descriptor read failed\n", \
+				index, ret); \
+			goto err; \
+		}
+
+		ARDUCAM_ENUM_READ("CTRL_ID_REG", CTRL_ID_REG, &id);
+		ARDUCAM_ENUM_READ("CTRL_MAX_REG", CTRL_MAX_REG, &max);
+		ARDUCAM_ENUM_READ("CTRL_MIN_REG", CTRL_MIN_REG, &min);
+		ARDUCAM_ENUM_READ("CTRL_DEF_REG", CTRL_DEF_REG, &def);
+		ARDUCAM_ENUM_READ("CTRL_STEP_REG", CTRL_STEP_REG, &step);
+#undef ARDUCAM_ENUM_READ
+
 		if (id == NO_DATA_AVAILABLE || max == NO_DATA_AVAILABLE ||
 			min == NO_DATA_AVAILABLE || def == NO_DATA_AVAILABLE ||
 			step == NO_DATA_AVAILABLE)
@@ -1392,22 +1431,36 @@ static int arducam_enum_controls(struct arducam *priv)
 		if (arducam_ctrl_get_name(id) != NULL) {
 			priv->ctrls[index] = v4l2_ctrl_new_arducam(ctrl_hdlr,
 						&arducam_ctrl_ops, id, min, max, step, def);
-			v4l2_dbg(1, debug, priv->client, "%s: new custom ctrl, ctrl: %p.\n",
-				__func__, priv->ctrls[index]);
 		} else {
-		v4l2_dbg(1, debug, priv->client, "%s: index = %x, id = %x, max = %x, min = %x\n",
-				__func__, index, id, max, min);
 			priv->ctrls[index] = v4l2_ctrl_new_std(ctrl_hdlr,
 						&arducam_ctrl_ops, id,
 						min, max, step, def);
+		}
+		dev_info(&client->dev, "index = %d\nstep = create control\nid = 0x%08x\nret = %d\n",
+			 index, id, priv->ctrls[index] ? 0 : -ENODEV);
+		if (!priv->ctrls[index]) {
+			ret = -ENODEV;
+			dev_err(&client->dev, "ENUM FAILED\nindex = %d\nstep = create control\nret = %d\nreason = v4l2 control allocation failed\n",
+				index, ret);
+			goto err;
 		}
 		index++;
 	}
 	priv->sd.ctrl_handler = ctrl_hdlr;
 	v4l2_ctrl_handler_setup(ctrl_hdlr);
-	arducam_write(client, CTRL_INDEX_REG, 0);
+	dev_info(&client->dev, "index = %d\nstep = reset CTRL_INDEX_REG\nCTRL_INDEX_REG (0x%04x) <- 0\n",
+		 index, CTRL_INDEX_REG);
+	ret = arducam_write(client, CTRL_INDEX_REG, 0);
+	dev_info(&client->dev, "ret = %d\n", ret);
+	if (ret < 0) {
+		dev_err(&client->dev, "ENUM FAILED\nindex = %d\nstep = reset CTRL_INDEX_REG\nret = %d\nreason = final index reset failed\n",
+			index, ret);
+		goto err;
+	}
 	return 0;
 err:
+	dev_err(&client->dev, "ENUM FAILED\nindex = %d\nstep = return -ENODEV\nret = %d\nreason = arducam_enum_controls failed\n",
+		index, ret);
 	return -ENODEV;
 }
 
