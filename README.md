@@ -29,3 +29,14 @@ Tested in ubuntu 16.04, 18.04 and 20.04
 Run the following command and follow the instructions
 
 * bash build_driver.sh
+
+# Out-of-tree/DKMS build
+The current driver source can be built against the running kernel with:
+
+* `make -C sourceCode`
+
+It can also be installed through DKMS by copying this repository to `/usr/src/arducam-obisp-1.0.0` and running:
+
+* `dkms add -m arducam-obisp -v 1.0.0`
+* `dkms build -m arducam-obisp -v 1.0.0`
+* `dkms install -m arducam-obisp -v 1.0.0`
