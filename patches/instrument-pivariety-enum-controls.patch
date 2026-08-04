@@ -50,7 +50,7 @@
 +	if (ret) {
 +		v4l2_err(sd, "ENUM FAILED\nindex = %d\nstep = v4l2_ctrl_handler_init\nret = %d\nreason = control handler init failed\n",
 +			 index, ret);
-		return ret;
+	return ret;
 +	}
 
 	mutex_init(&pivariety->mutex);
